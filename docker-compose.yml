@@ -1,0 +1,321 @@
+version: '3.8'
+
+services:
+  # Databases
+  postgres:
+    image: postgres:16-alpine
+    container_name: postgres
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    ports:
+      - "${POSTGRES_PORT}:${POSTGRES_PORT}"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./init.sql:/docker-entrypoint-initdb.d/init.sql
+    networks:
+      - ecommerce-net
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U admin"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:alpine
+    container_name: redis
+    ports:
+      - "${REDIS_PORT}:${REDIS_PORT}"
+    networks:
+      - ecommerce-net
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Message Broker
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.6.0
+    container_name: zookeeper
+    environment:
+      ZOOKEEPER_CLIENT_PORT: ${ZOOKEEPER_PORT}
+      ZOOKEEPER_TICK_TIME: 2000
+    ports:
+      - "${ZOOKEEPER_PORT}:${ZOOKEEPER_PORT}"
+    networks:
+      - ecommerce-net
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "nc", "-z", "localhost", "2181"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  kafka:
+    image: confluentinc/cp-kafka:7.6.0
+    container_name: kafka
+    ports:
+      - "${KAFKA_PORT_INTERNAL}:${KAFKA_PORT_INTERNAL}"
+    depends_on:
+      zookeeper:
+        condition: service_healthy
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: ${ZOOKEEPER_HOST}:${ZOOKEEPER_PORT}
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://${KAFKA_HOST}:${KAFKA_PORT_EXTERNAL},PLAINTEXT_HOST://localhost:${KAFKA_PORT_INTERNAL}
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+    networks:
+      - ecommerce-net
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "kafka-topics", "--bootstrap-server", "localhost:9092", "--list"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
+  # Observability
+  zipkin:
+    image: openzipkin/zipkin
+    container_name: zipkin
+    ports:
+      - "${PORT_ZIPKIN}:${PORT_ZIPKIN}"
+    networks:
+      - ecommerce-net
+    restart: unless-stopped
+
+  # Core Services
+  config-server:
+    build: ./config-server
+    container_name: config-server
+    ports:
+      - "${PORT_CONFIG}:${PORT_CONFIG}"
+    depends_on:
+      - zipkin
+    environment:
+      SPRING_PROFILES_ACTIVE: ${APP_PROFILE}
+      CONFIG_SERVER_URL: ${CONFIG_SERVER_URL}
+      CONFIG_GIT_URI: ${CONFIG_GIT_URI}
+      CONFIG_GIT_BRANCH: ${CONFIG_GIT_BRANCH}
+    networks:
+      - ecommerce-net
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8888/actuator/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
+  discovery-server:
+    build: ./discovery-server
+    container_name: discovery-server
+    ports:
+      - "${PORT_DISCOVERY}:${PORT_DISCOVERY}"
+    depends_on:
+      config-server:
+        condition: service_healthy
+    environment:
+      SPRING_PROFILES_ACTIVE: ${APP_PROFILE}
+      CONFIG_SERVER_URL: ${CONFIG_SERVER_URL}
+    networks:
+      - ecommerce-net
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8761/actuator/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
+  api-gateway:
+    build: ./api-gateway
+    container_name: api-gateway
+    ports:
+      - "${PORT_GATEWAY}:${PORT_GATEWAY}"
+    depends_on:
+      discovery-server:
+        condition: service_healthy
+      config-server:
+        condition: service_healthy
+    environment:
+      SPRING_PROFILES_ACTIVE: ${APP_PROFILE}
+      CONFIG_SERVER_URL: ${CONFIG_SERVER_URL}
+    networks:
+      - ecommerce-net
+    restart: unless-stopped
+
+  # Business Services
+  auth-service:
+    build: ./auth-service
+    container_name: auth-service
+    ports:
+      - "${PORT_AUTH}:${PORT_AUTH}"
+    depends_on:
+      discovery-server:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+      config-server:
+        condition: service_healthy
+    environment:
+      SPRING_PROFILES_ACTIVE: ${APP_PROFILE}
+      CONFIG_SERVER_URL: ${CONFIG_SERVER_URL}
+      DB_HOST: ${DB_HOST}
+      DB_USERNAME: ${POSTGRES_USER}
+      DB_PASSWORD: ${POSTGRES_PASSWORD}
+      JWT_SECRET_KEY: ${JWT_SECRET_KEY}
+    networks:
+      - ecommerce-net
+    restart: unless-stopped
+
+  user-service:
+    build: ./user-service
+    container_name: user-service
+    ports:
+      - "${PORT_USER}:${PORT_USER}"
+    depends_on:
+      discovery-server:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+      config-server:
+        condition: service_healthy
+    environment:
+      SPRING_PROFILES_ACTIVE: ${APP_PROFILE}
+      CONFIG_SERVER_URL: ${CONFIG_SERVER_URL}
+      DB_HOST: ${DB_HOST}
+      DB_USERNAME: ${POSTGRES_USER}
+      DB_PASSWORD: ${POSTGRES_PASSWORD}
+    networks:
+      - ecommerce-net
+    restart: unless-stopped
+
+  product-service:
+    build: ./product-service
+    container_name: product-service
+    ports:
+      - "${PORT_PRODUCT}:${PORT_PRODUCT}"
+    depends_on:
+      discovery-server:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+      config-server:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      SPRING_PROFILES_ACTIVE: ${APP_PROFILE}
+      CONFIG_SERVER_URL: ${CONFIG_SERVER_URL}
+      DB_HOST: ${DB_HOST}
+      DB_USERNAME: ${POSTGRES_USER}
+      DB_PASSWORD: ${POSTGRES_PASSWORD}
+      REDIS_HOST: ${REDIS_HOST}
+    networks:
+      - ecommerce-net
+    restart: unless-stopped
+  
+  order-service:
+    build: ./order-service
+    container_name: order-service
+    ports:
+      - "${PORT_ORDER}:${PORT_ORDER}"
+    depends_on:
+      discovery-server:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+      config-server:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+    environment:
+      SPRING_PROFILES_ACTIVE: ${APP_PROFILE}
+      CONFIG_SERVER_URL: ${CONFIG_SERVER_URL}
+      DB_HOST: ${DB_HOST}
+      DB_USERNAME: ${POSTGRES_USER}
+      DB_PASSWORD: ${POSTGRES_PASSWORD}
+      KAFKA_BOOTSTRAP_SERVERS: ${KAFKA_HOST}:${KAFKA_PORT_EXTERNAL}
+    networks:
+      - ecommerce-net
+    restart: unless-stopped
+
+  inventory-service:
+    build: ./inventory-service
+    container_name: inventory-service
+    ports:
+      - "${PORT_INVENTORY}:${PORT_INVENTORY}"
+    depends_on:
+      discovery-server:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+      config-server:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+    environment:
+      SPRING_PROFILES_ACTIVE: ${APP_PROFILE}
+      CONFIG_SERVER_URL: ${CONFIG_SERVER_URL}
+      DB_HOST: ${DB_HOST}
+      DB_USERNAME: ${POSTGRES_USER}
+      DB_PASSWORD: ${POSTGRES_PASSWORD}
+      KAFKA_BOOTSTRAP_SERVERS: ${KAFKA_HOST}:${KAFKA_PORT_EXTERNAL}
+    networks:
+      - ecommerce-net
+    restart: unless-stopped
+
+  payment-service:
+    build: ./payment-service
+    container_name: payment-service
+    ports:
+      - "${PORT_PAYMENT}:${PORT_PAYMENT}"
+    depends_on:
+      discovery-server:
+        condition: service_healthy
+      config-server:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+    environment:
+      SPRING_PROFILES_ACTIVE: ${APP_PROFILE}
+      CONFIG_SERVER_URL: ${CONFIG_SERVER_URL}
+      KAFKA_BOOTSTRAP_SERVERS: ${KAFKA_HOST}:${KAFKA_PORT_EXTERNAL}
+      PAYMENT_SUCCESS_RATE: ${PAYMENT_SUCCESS_RATE}
+      PAYMENT_DELAY_MS: ${PAYMENT_DELAY_MS}
+    networks:
+      - ecommerce-net
+    restart: unless-stopped
+
+  notification-service:
+    build: ./notification-service
+    container_name: notification-service
+    ports:
+      - "${PORT_NOTIFICATION}:${PORT_NOTIFICATION}"
+    depends_on:
+      discovery-server:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+      config-server:
+        condition: service_healthy
+    environment:
+      SPRING_PROFILES_ACTIVE: ${APP_PROFILE}
+      CONFIG_SERVER_URL: ${CONFIG_SERVER_URL}
+      KAFKA_BOOTSTRAP_SERVERS: ${KAFKA_HOST}:${KAFKA_PORT_EXTERNAL}
+      EMAIL_ENABLED: ${EMAIL_ENABLED}
+      SMS_ENABLED: ${SMS_ENABLED}
+    networks:
+      - ecommerce-net
+    restart: unless-stopped
+
+networks:
+  ecommerce-net:
+    driver: bridge
+
+volumes:
+  postgres_data:

@@ -1,0 +1,58 @@
+server:
+  port: 8888
+
+spring:
+  application:
+    name: config-server
+  profiles:
+    active: ${SPRING_PROFILES_ACTIVE:git}
+  cloud:
+    config:
+      server:
+        # Native profile - uses local classpath for configuration
+        native:
+          search-locations: classpath:/config
+        # Git profile - uses remote git repository
+        git:
+          uri: ${CONFIG_GIT_URI:https://github.com/omerbzk/ecommerce-microservices-config-repo}
+          default-label: ${CONFIG_GIT_BRANCH:master}
+          timeout: 5
+          clone-on-start: true
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+  endpoint:
+    health:
+      show-details: always
+
+logging:
+  level:
+    org.springframework.cloud.config: INFO
+
+---
+# Native profile
+spring:
+  config:
+    activate:
+      on-profile: native
+  cloud:
+    config:
+      server:
+        native:
+          search-locations: classpath:/config
+
+---
+# Git & Docker profiles
+spring:
+  config:
+    activate:
+      on-profile: git,docker
+  cloud:
+    config:
+      server:
+        git:
+          uri: ${CONFIG_GIT_URI:https://github.com/omerbzk/ecommerce-microservices-config-repo}
+          default-label: ${CONFIG_GIT_BRANCH:master}
