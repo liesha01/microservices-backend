@@ -9,7 +9,7 @@
     <artifactId>ecommerce-microservices</artifactId>
     <version>1.0.0</version>
 
-    <packaging>pom</packaging>
+    <packaging>pom</packaging> 
 
     <modules>
         <module>api-gateway</module>
