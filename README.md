@@ -1,6 +1,6 @@
 # Java Spring Boot E-Commerce Microservices
 
-A production-ready e-commerce system built with Spring Boot, Spring Cloud, and Docker featuring **Choreography-based Saga Pattern** for distributed transactions.
+A production-ready e-commerce system built with Spring Boot, Spring Cloud, and Docker featuring **Choreography-based Saga Pattern** for distributed transactions. 
 
 ## Architecture Overview
 
