@@ -1,7 +1,7 @@
 package com.ecommerce.authservice.controller;
 
 import com.ecommerce.authservice.dto.*;
-import com.ecommerce.authservice.service.AuthService;
+import com.ecommerce.authservice.service.AuthService; 
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.PostMapping;
