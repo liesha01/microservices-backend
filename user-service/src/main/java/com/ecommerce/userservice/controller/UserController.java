@@ -4,7 +4,7 @@ import com.ecommerce.userservice.dto.UserProfileRequest;
 import com.ecommerce.userservice.dto.UserProfileResponse;
 import com.ecommerce.userservice.service.UserService;
 import lombok.RequiredArgsConstructor;
-import org.springframework.http.ResponseEntity;
+import org.springframework.http.ResponseEntity; 
 import org.springframework.web.bind.annotation.*;
 
 @RestController
