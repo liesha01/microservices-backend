@@ -1,5 +1,5 @@
 package com.ecommerce.productservice.entity;
-
+ 
 import jakarta.persistence.*;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
